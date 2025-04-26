@@ -1,1 +1,0 @@
-name='John Doe' email='joh1@example.com' password='mysecretpassword'
