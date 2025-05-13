@@ -17,6 +17,18 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-
+  # add FastAPI service
+  fastapi:
+      build:
+        context: .
+        dockerfile: Dockerfile
+      container_name: fastapi_app
+      environment:
+        DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      ports:
+      - "8000:8000"
+      depends_on:
+        postgres:
+          condition: service_healthy
 volumes:
   postgres_data:
