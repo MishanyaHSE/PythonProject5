@@ -5,10 +5,6 @@ from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy import extract, and_, func, column
 from starlette.responses import StreamingResponse
 
-from app.models import User, Note, UserQuestions, RefreshToken, UserVerification
-from app.database import get_db, Base, engine
-from app.schemas import UserCreate, UserResponse, Token, TokenData, UserAuth, NoteCreate, NoteResponse, QuestionsResponse, \
-    QuestionsData, ReportCreate, StatisticsCreate, PasswordReset
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from jose import jwt, JWTError
@@ -31,7 +27,10 @@ from reportlab.pdfgen import canvas
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
-
+from app.models import User, Note, UserQuestions, RefreshToken, UserVerification
+from app.database import get_db, Base, engine
+from app.schemas import UserCreate, UserResponse, Token, TokenData, UserAuth, NoteCreate, NoteResponse, QuestionsResponse, \
+    QuestionsData, ReportCreate, StatisticsCreate, PasswordReset
 
 # Секретный ключ для JWT
 SECRET_KEY = "your_secret_key_here"
@@ -48,13 +47,9 @@ SMTP_CONFIG = {
 pwd_context = CryptContext(schemes=["bcrypt"], default="bcrypt")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
-
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-
-
 
 app = FastAPI()
 
@@ -65,8 +60,9 @@ async def startup():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-
     # Функция для верификации пароля
+
+
 def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
 
@@ -74,6 +70,7 @@ def verify_password(plain_password, hashed_password):
 # Функция для хеширования пароля
 def get_password_hash(password):
     return pwd_context.hash(password)
+
 
 async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)):
     credentials_exception = HTTPException(status_code=401, detail="Could not validate credentials")
@@ -107,7 +104,7 @@ async def create_user(user: UserCreate, db: AsyncSession = Depends(get_db)):
         new_user = User(
             name=user.name,
             email=str(user.email),
-            password=get_password_hash(user.password),# Хешируем пароль
+            password=get_password_hash(user.password),  # Хешируем пароль
             is_verified=False
         )
         db.add(new_user)
@@ -121,8 +118,8 @@ async def create_user(user: UserCreate, db: AsyncSession = Depends(get_db)):
         send_verification_code(new_user.email, user_verification.code)
         new_user_questions = UserQuestions(user_id=new_user.id, time_question=True, duration_question=True,
                                            intensity_question=True, pain_type_question=True, area_question=True,
-                                           triggers_question=True,medicine_question=True,symptoms_question=True,
-                                           pressure_question=True,comment_question=True)
+                                           triggers_question=True, medicine_question=True, symptoms_question=True,
+                                           pressure_question=True, comment_question=True)
         db.add(new_user_questions)
         logger.info(f"Added user questions")
         await db.commit()
@@ -147,8 +144,6 @@ async def verify_code(email: str, code: str, db: AsyncSession = Depends(get_db))
         return {'message': 'Verification code is valid'}
     else:
         raise HTTPException(status_code=400, detail="Code is invalid or has been expired")
-
-
 
 
 def send_verification_code(email, code):
@@ -190,15 +185,13 @@ def send_report_to_email(recipient, pdf_buffer, format):
         raise HTTPException(status_code=500, detail=f"Email sending failed: {str(e)}")
 
 
-
-
-
 async def validate_verification_code(code, email, db):
     existing_user = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
     if existing_user is None:
         logger.info(f"User not found")
         return False
-    user_verification = (await db.execute(select(UserVerification).where(UserVerification.email == email))).scalar_one_or_none()
+    user_verification = (
+        await db.execute(select(UserVerification).where(UserVerification.email == email))).scalar_one_or_none()
     if user_verification is None:
         logger.info(f"Verification code not found")
         return False
@@ -218,7 +211,6 @@ async def validate_verification_code(code, email, db):
             return True
 
 
-
 def generate_verification_code(email):
     code = str(secrets.randbelow(999999)).zfill(6)
     date = datetime.now()
@@ -226,17 +218,17 @@ def generate_verification_code(email):
     return user_reg
 
 
-
 # Эндпоинт для получения токена
 @app.post("/login", response_model=Token)
-async def login_for_access_token(form_data: UserAuth , db: AsyncSession = Depends(get_db)):
+async def login_for_access_token(form_data: UserAuth, db: AsyncSession = Depends(get_db)):
     user = (await db.execute(select(User).where(User.email == form_data.username))).scalar_one_or_none()
     if not user or not verify_password(form_data.password, user.password) or not user.is_verified:
         raise HTTPException(status_code=401, detail="Incorrect email or password")
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     refresh_token_delta = timedelta(minutes=REFRESH_TOKEN_EXPIRE_MINUTES)
-    access_token, refresh_token = await create_access_token(user.id, data={"sub": user.email}, expires_delta=access_token_expires,
-                                       refresh_delta=refresh_token_delta)
+    access_token, refresh_token = await create_access_token(user.id, data={"sub": user.email},
+                                                            expires_delta=access_token_expires,
+                                                            refresh_delta=refresh_token_delta)
     pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
     token_hash = pwd_context.hash(refresh_token)
     db_token = RefreshToken(
@@ -260,8 +252,9 @@ async def refresh_token(refreshtoken: str = Depends(oauth2_scheme), user: User =
     # new_token, new_refresh_token = create_access_token(data={"sub": user.email}, expires_delta=access_token_expires,
     #                                                   refresh_delta=refresh_token_delta)
     if is_valid_refresh_token(refreshtoken):
-        new_token, refresh_token = await create_access_token(user.id, data={"sub": user.email}, expires_delta=access_token_expires,
-                            refresh_delta=refresh_token_delta)
+        new_token, refresh_token = await create_access_token(user.id, data={"sub": user.email},
+                                                             expires_delta=access_token_expires,
+                                                             refresh_delta=refresh_token_delta)
         token_hash = pwd_context.hash(refresh_token)
         db_token = RefreshToken(
             token=refresh_token,
@@ -276,8 +269,6 @@ async def refresh_token(refreshtoken: str = Depends(oauth2_scheme), user: User =
         return {"access_token": new_token, "refresh_token": refresh_token, "token_type": "bearer"}
     else:
         raise HTTPException(status_code=401, detail="Could not validate credentials")
-
-
 
 
 async def is_valid_refresh_token(token, db: AsyncSession = Depends(get_db)):
@@ -317,11 +308,9 @@ async def add_refresh_token_to_whitelist(
     return refresh_token
 
 
-
-
-
 # Функция для создания JWT
-async def create_access_token(user_id: int, data: dict, expires_delta: timedelta | None = None, refresh_delta: timedelta | None = None):
+async def create_access_token(user_id: int, data: dict, expires_delta: timedelta | None = None,
+                              refresh_delta: timedelta | None = None):
     to_encode = data.copy()
     expire = datetime.utcnow() + expires_delta
     refresh = datetime.utcnow() + refresh_delta
@@ -341,8 +330,10 @@ async def create_access_token(user_id: int, data: dict, expires_delta: timedelta
 async def read_users_me(current_user: User = Depends(get_current_user)):
     return current_user
 
+
 @app.get("/users/notes/{date}/", response_model=list[NoteResponse])
-async def read_users_notes(date: datetime, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def read_users_notes(date: datetime, current_user: User = Depends(get_current_user),
+                           db: AsyncSession = Depends(get_db)):
     query = (
         select(Note)
         .where(
@@ -357,8 +348,10 @@ async def read_users_notes(date: datetime, current_user: User = Depends(get_curr
     result = await db.execute(query)
     return result.scalars().all()
 
+
 @app.get("/users/notes/one/{date}/", response_model=NoteCreate)
-async def get_one_note(date: datetime, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def get_one_note(date: datetime, current_user: User = Depends(get_current_user),
+                       db: AsyncSession = Depends(get_db)):
     query = (
         select(Note)
         .where(
@@ -375,7 +368,8 @@ async def get_one_note(date: datetime, current_user: User = Depends(get_current_
 
 
 @app.post("/users/notes", response_model=NoteResponse)
-async def write_users_notes(note: NoteCreate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def write_users_notes(note: NoteCreate, current_user: User = Depends(get_current_user),
+                            db: AsyncSession = Depends(get_db)):
     # db_note = Note(is_headache=note.is_headache, date=note.date, headache_time=note.headache_time,
     # intensity=note.intensity, medicine=note.medicine, user_id=current_user.id)
     db_note = Note(user_id=current_user.id, **note.model_dump())
@@ -383,6 +377,7 @@ async def write_users_notes(note: NoteCreate, current_user: User = Depends(get_c
     await db.commit()
     await db.refresh(db_note)
     return db_note
+
 
 @app.post("/users/forgot-password/{email}")
 async def forgot_password(email: str, db: AsyncSession = Depends(get_db)):
@@ -418,9 +413,6 @@ async def reset_password(reset_data: PasswordReset, db: AsyncSession = Depends(g
         await db.refresh(user)
     else:
         raise HTTPException(status_code=404, detail="Code not found or has expired")
-
-
-
 
 
 @app.get("/users/{user_id}/", response_model=UserResponse)
@@ -462,13 +454,16 @@ async def delete_note_by_date(date: datetime, current_user: User = Depends(get_c
 
 @app.get("/users/questions", response_model=QuestionsResponse)
 async def read_users_questions(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    questions =  (await db.execute(select(UserQuestions).where(UserQuestions.user_id == current_user.id))).scalar_one_or_none()
+    questions = (
+        await db.execute(select(UserQuestions).where(UserQuestions.user_id == current_user.id))).scalar_one_or_none()
     return questions
 
 
 @app.put("/users/questions", response_model=QuestionsResponse)
-async def update_questions(questions_data: QuestionsData, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    questions = (await db.execute(select(UserQuestions).where(UserQuestions.user_id == current_user.id))).scalar_one_or_none()
+async def update_questions(questions_data: QuestionsData, current_user: User = Depends(get_current_user),
+                           db: AsyncSession = Depends(get_db)):
+    questions = (
+        await db.execute(select(UserQuestions).where(UserQuestions.user_id == current_user.id))).scalar_one_or_none()
     questions.time_question = questions_data.time_question
     questions.duration_question = questions_data.duration_question
     questions.intensity_question = questions_data.intensity_question
@@ -484,9 +479,9 @@ async def update_questions(questions_data: QuestionsData, current_user: User = D
     return questions
 
 
-
 @app.post("/users/report")
-async def generate_report(report: ReportCreate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def generate_report(report: ReportCreate, current_user: User = Depends(get_current_user),
+                          db: AsyncSession = Depends(get_db)):
     query = (
         select(Note)
         .where(
@@ -502,7 +497,8 @@ async def generate_report(report: ReportCreate, current_user: User = Depends(get
     if report.format == 0:
         buffer = create_pdf(result)
         if report.send_to_mail:
-            return StreamingResponse(buffer, media_type="application/pdf", headers={f"Content-Disposition": f'attachment; filename="report.pdf"'})
+            return StreamingResponse(buffer, media_type="application/pdf",
+                                     headers={f"Content-Disposition": f'attachment; filename="report.pdf"'})
         else:
             send_report_to_email(current_user.email, buffer, 'pdf')
     else:
@@ -521,6 +517,7 @@ def convert_to_native(df_grouped):
     return df_grouped.reset_index().applymap(
         lambda x: x.item() if isinstance(x, np.generic) else x
     )
+
 
 async def create_statistics(date_start, date_end, user_id, db):
     query = (
@@ -543,15 +540,15 @@ async def create_statistics(date_start, date_end, user_id, db):
     df = pd.DataFrame(data)
 
     total_days = (date_end - date_start).days + 1
-    #1 пункт
+    # 1 пункт
     percent = round((len(notes) / total_days * 100))
     result["fill_percentage"] = percent
-    #2 пункт
+    # 2 пункт
     pain_days = df[df['is_headache']]
     days_with_pain = len(pain_days)
     days_without_pain = len(notes) - days_with_pain
     result["headache_days"] = {'without_pain': days_without_pain, 'with_pain': days_with_pain}
-    #3 пункт
+    # 3 пункт
     df['headache_hour'] = df['headache_time'].apply(lambda x: x.hour if pd.notnull(x) and pd.notnull(x.hour) else None)
     condition = [
         (df['headache_hour'].between(23, 23) | df['headache_hour'].between(0, 5)),
@@ -568,21 +565,25 @@ async def create_statistics(date_start, date_end, user_id, db):
         cat: int(time_stats.get(cat, 0))
         for cat in choices if cat != 'na'
     }
-    #4 пункт
+    # 4 пункт
     top_durations = ((df[df['is_headache']]
-                     .groupby('duration')
-                     .size()
-                     .sort_values(ascending=False)
-                     .reset_index(name='count'))
+                      .groupby('duration')
+                      .size()
+                      .sort_values(ascending=False)
+                      .reset_index(name='count'))
                      .to_dict('records'))
     result['top_durations'] = top_durations
-    #5 пункт
+    # 5 пункт
     mean_intensity = round(df[df['is_headache']]['intensity'].mean(), 1) if not df[df['is_headache']].empty else 0
     result['mean_intensity'] = mean_intensity
-    #6 пункт
-    triggers_series = (df[df['is_headache'] & df['triggers'].notnull() & df['triggers'].astype(str).ne('[]')].explode('triggers')['triggers'].dropna().str.strip())
-    top_triggers_dict = triggers_series.value_counts().head(3).reset_index(name='count').rename(columns={'index':'trigger'}).to_dict()
-    top_triggers = [{'name': top_triggers_dict['triggers'][i], 'count': top_triggers_dict['count'][i]} for i in range(len(top_triggers_dict['count'].keys()))]
+    # 6 пункт
+    triggers_series = (
+        df[df['is_headache'] & df['triggers'].notnull() & df['triggers'].astype(str).ne('[]')].explode('triggers')[
+            'triggers'].dropna().str.strip())
+    top_triggers_dict = triggers_series.value_counts().head(3).reset_index(name='count').rename(
+        columns={'index': 'trigger'}).to_dict()
+    top_triggers = [{'name': top_triggers_dict['triggers'][i], 'count': top_triggers_dict['count'][i]} for i in
+                    range(len(top_triggers_dict['count'].keys()))]
     counted_triggers = [i['name'] for i in top_triggers]
     count = 0
     for note in notes:
@@ -593,7 +594,7 @@ async def create_statistics(date_start, date_end, user_id, db):
     top_triggers.append({'name': 'Остальные', 'count': count})
 
     result['top_triggers'] = top_triggers
-    #7 пункт
+    # 7 пункт
 
     # result['top_triggers'] = top_triggers
     # Форматируем результат
@@ -601,9 +602,9 @@ async def create_statistics(date_start, date_end, user_id, db):
 
 
 @app.post("/users/statistics")
-async def get_statistics(statistics_info: StatisticsCreate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def get_statistics(statistics_info: StatisticsCreate, current_user: User = Depends(get_current_user),
+                         db: AsyncSession = Depends(get_db)):
     return await create_statistics(statistics_info.date_start, statistics_info.date_end, current_user.id, db)
-
 
 
 def create_csv(context):
@@ -611,7 +612,6 @@ def create_csv(context):
     text_buffer = io.StringIO()
 
     writer = csv.writer(text_buffer)
-
 
     # writer.writerow(['Дата'])
     for item in context:
@@ -691,6 +691,7 @@ def create_pdf(content):
     buffer.seek(0)
     return buffer
 
+
 def prepare_note_content(note):
     content = []
     content.append(f"Дата: {note.date.strftime('%d.%m.%Y')}")
@@ -725,7 +726,7 @@ def prepare_note_content(note):
             if meds:
                 content.append(f"Медикаменты: {', '.join(meds)}")
 
-    # Данные давления
+        # Данные давления
         pressure = []
         if note.pressure_morning_up or note.pressure_morning_down:
             pressure.append(f"Утро: {note.pressure_morning_up or '-'}/{note.pressure_morning_down or '-'}")
@@ -740,5 +741,3 @@ def prepare_note_content(note):
         content.append("Головная боль: Нет")
 
     return content
-
-
