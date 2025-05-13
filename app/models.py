@@ -3,7 +3,9 @@ import dataclasses
 from sqlalchemy import Column, Integer, String, ForeignKey, Date, Boolean, Time, DateTime, ARRAY
 from sqlalchemy.dialects.postgresql import TIMESTAMP, JSONB
 
+# внимание на этот импорт
 from .database import Base
+
 
 class User(Base):
     __tablename__ = "users"

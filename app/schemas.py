@@ -59,7 +59,7 @@ class ReportCreate(StatisticsCreate):
 
 
 
-class UserResponse(BaseModel):
+class UserResponse(BaseModel):   # модельки типа UserResponse, UserCreate и тд выноси в роутеры
     id: int
     name: str
     email: str

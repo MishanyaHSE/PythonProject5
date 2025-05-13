@@ -33,8 +33,8 @@ from reportlab.pdfbase.ttfonts import TTFont
 
 
 
-# Секретный ключ для JWT
-SECRET_KEY = "your_secret_key_here"
+# Секретный ключ для JWT                                                       # вот это говно в .env бы унести
+SECRET_KEY = "your_secret_key_here"   # мб нормальновое нагенерить?
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 600
 REFRESH_TOKEN_EXPIRE_MINUTES = 30 * 6000
@@ -44,6 +44,7 @@ SMTP_CONFIG = {
     "user": os.getenv("SMTP_USER", "your-email@gmail.com"),
     "password": os.getenv("SMTP_PASSWORD", "your-app-password")
 }
+                                                                                # конец говна которое нужно в .env
 
 pwd_context = CryptContext(schemes=["bcrypt"], default="bcrypt")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
@@ -60,7 +61,7 @@ app = FastAPI()
 
 
 # Создаем таблицы при старте (в продакшене используйте Alembic)
-@app.on_event("startup")
+@app.on_event("startup")  # on_event - deprecated. используй lifecycle генератор
 async def startup():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -155,7 +156,7 @@ async def verify_code(email: str, code: str, db: AsyncSession = Depends(get_db))
 
 
 
-def send_verification_code(email, code):
+def send_verification_code(email, code):     # утилити функции унеси в utils файл
     msg = EmailMessage()
     msg["Subject"] = "Код подтверждения"
     msg["From"] = SMTP_CONFIG["user"]
@@ -229,6 +230,7 @@ def generate_verification_code(email):
     user_reg = UserVerification(email=email, code=code, created_at=date)
     return user_reg
 
+# напили папку routes и в нее складывай роуты. все что касается логина в login.py и так далее. main должен быть коротеньким и чистым
 
 
 # Эндпоинт для получения токена

@@ -1,4 +1,5 @@
 import uvicorn
 
+# удалить кхуям
 if __name__ == "__main__":
     uvicorn.run("main:app", reload=False, log_level="debug")
