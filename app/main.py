@@ -5,9 +5,9 @@ from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy import extract, and_, func, column
 from starlette.responses import StreamingResponse
 
-from .models import User, Note, UserQuestions, RefreshToken, UserVerification
-from .database import get_db, Base, engine
-from .schemas import UserCreate, UserResponse, Token, TokenData, UserAuth, NoteCreate, NoteResponse, QuestionsResponse, \
+from app.models import User, Note, UserQuestions, RefreshToken, UserVerification
+from app.database import get_db, Base, engine
+from app.schemas import UserCreate, UserResponse, Token, TokenData, UserAuth, NoteCreate, NoteResponse, QuestionsResponse, \
     QuestionsData, ReportCreate, StatisticsCreate, PasswordReset
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -94,12 +94,9 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession
 # Эндпоинт для создания пользователя
 @app.post("/register", response_model=UserResponse)
 async def create_user(user: UserCreate, db: AsyncSession = Depends(get_db)):
-    logger.info(str(user))
     try:
-        # Проверка существующего пользователя
         existing_user = (await db.execute(select(User).where(User.email == user.email))).scalar_one_or_none()
         if existing_user and existing_user.is_verified:
-            # Пример использования в коде
             raise HTTPException(status_code=400, detail="Email already registered")
         elif existing_user and not existing_user.is_verified:
             await db.delete(existing_user)
@@ -107,7 +104,6 @@ async def create_user(user: UserCreate, db: AsyncSession = Depends(get_db)):
                             .scalar_one_or_none())
             await db.commit()
 
-        # Создаем пользователя с ВСЕМИ полями
         new_user = User(
             name=user.name,
             email=str(user.email),
@@ -150,7 +146,7 @@ async def verify_code(email: str, code: str, db: AsyncSession = Depends(get_db))
         await db.refresh(user)
         return {'message': 'Verification code is valid'}
     else:
-        raise HTTPException(status_code=400, detail="Code is nivalid or has been expired")
+        raise HTTPException(status_code=400, detail="Code is invalid or has been expired")
 
 
 
