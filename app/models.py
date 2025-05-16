@@ -1,5 +1,3 @@
-import dataclasses
-
 from sqlalchemy import Column, Integer, String, ForeignKey, Date, Boolean, Time, DateTime, ARRAY
 from sqlalchemy.dialects.postgresql import TIMESTAMP, JSONB
 
@@ -28,7 +26,7 @@ class Note(Base):
     __tablename__ = "notes"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"))
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
     date = Column(Date, nullable=False)
     is_headache = Column(Boolean, nullable=False)
     headache_time = Column(Time)
@@ -50,7 +48,7 @@ class UserQuestions(Base):
     __tablename__ = "user_questions"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"))
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
     time_question = Column(Boolean, nullable=False)
     duration_question = Column(Boolean, nullable=False)
     intensity_question = Column(Boolean, nullable=False)
@@ -67,8 +65,7 @@ class RefreshToken(Base):
     __tablename__ = "tokens"
 
     id = Column(Integer, primary_key=True, index=True)
-    token = Column(String, unique=True, index=True)  # Сам токен
-    token_hash = Column(String)  # Хеш токена (опционально)
-    user_id = Column(Integer, index=True)  # Связь с пользователем
+    token = Column(String, unique=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
     expires_at = Column(DateTime)
     revoked = Column(Boolean, default=False)

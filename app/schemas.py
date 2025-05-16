@@ -1,4 +1,3 @@
-from tracemalloc import Statistic
 from typing import Any, List, Optional
 from pydantic import BaseModel, EmailStr, Json
 from datetime import date, datetime, time, timedelta
@@ -52,11 +51,6 @@ class StatisticsCreate(BaseModel):
 class ReportCreate(StatisticsCreate):
     format: int
     send_to_mail: bool
-    statistics: bool
-
-
-
-
 
 
 class UserResponse(BaseModel):

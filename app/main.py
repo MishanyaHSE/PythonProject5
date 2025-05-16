@@ -3,6 +3,7 @@ import os
 
 from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy import extract, and_, func, column
+from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import StreamingResponse
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,10 +33,9 @@ from app.database import get_db, Base, engine
 from app.schemas import UserCreate, UserResponse, Token, TokenData, UserAuth, NoteCreate, NoteResponse, QuestionsResponse, \
     QuestionsData, ReportCreate, StatisticsCreate, PasswordReset
 
-# Секретный ключ для JWT
-SECRET_KEY = "your_secret_key_here"
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 600
+SECRET_KEY = os.getenv("SECRET_KEY")
+ALGORITHM = os.getenv("ALGORITHM")
+ACCESS_TOKEN_EXPIRE_MINUTES = 15
 REFRESH_TOKEN_EXPIRE_MINUTES = 30 * 6000
 SMTP_CONFIG = {
     "host": os.getenv("SMTP_HOST", "smtp.gmail.com"),
@@ -52,6 +52,16 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
+
+origins = ["*"]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=origins,
+    allow_headers=origins,
+)
 
 
 # Создаем таблицы при старте (в продакшене используйте Alembic)
@@ -96,9 +106,14 @@ async def create_user(user: UserCreate, db: AsyncSession = Depends(get_db)):
         if existing_user and existing_user.is_verified:
             raise HTTPException(status_code=400, detail="Email already registered")
         elif existing_user and not existing_user.is_verified:
-            await db.delete(existing_user)
-            await db.delete((await db.execute(select(UserVerification).where(UserVerification.email == user.email)))
+            await db.delete(
+                (await db.execute(select(UserQuestions).where(UserQuestions.user_id == existing_user.id)))
+                .scalar_one_or_none())
+            await db.commit()
+            await db.delete((await db.execute(select(UserVerification).where(UserVerification.email == existing_user.email)))
                             .scalar_one_or_none())
+            await db.commit()
+            await db.delete(existing_user)
             await db.commit()
 
         new_user = User(
@@ -161,28 +176,7 @@ def send_verification_code(email, code):
         raise HTTPException(status_code=500, detail=f"Email sending failed: {str(e)}")
 
 
-def send_report_to_email(recipient, pdf_buffer, format):
-    try:
-        # Создаем контейнер для письма
-        msg = MIMEMultipart()
-        msg['Subject'] = format.upper() + ' Report'
-        msg['From'] = SMTP_CONFIG["user"]
-        msg['To'] = recipient
 
-        # Добавляем текстовую часть
-        text = MIMEText("Please find attached the PDF report.")
-        msg.attach(text)
-        attachment = MIMEApplication(pdf_buffer.read(), _subtype=format)
-        attachment.add_header('Content-Disposition', 'attachment', filename='report.' + format)
-        msg.attach(attachment)
-
-        # Отправляем письмо
-        with smtplib.SMTP(SMTP_CONFIG["host"], SMTP_CONFIG["port"]) as server:
-            server.starttls()
-            server.login(SMTP_CONFIG["user"], SMTP_CONFIG["password"])
-            server.send_message(msg)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Email sending failed: {str(e)}")
 
 
 async def validate_verification_code(code, email, db):
@@ -230,10 +224,8 @@ async def login_for_access_token(form_data: UserAuth, db: AsyncSession = Depends
                                                             expires_delta=access_token_expires,
                                                             refresh_delta=refresh_token_delta)
     pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-    token_hash = pwd_context.hash(refresh_token)
     db_token = RefreshToken(
         token=refresh_token,
-        token_hash=token_hash,
         user_id=user.id,
         expires_at=datetime.utcnow() + refresh_token_delta,
         revoked=False
@@ -249,16 +241,12 @@ async def refresh_token(refreshtoken: str = Depends(oauth2_scheme), user: User =
                         db: AsyncSession = Depends(get_db)):
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     refresh_token_delta = timedelta(minutes=REFRESH_TOKEN_EXPIRE_MINUTES)
-    # new_token, new_refresh_token = create_access_token(data={"sub": user.email}, expires_delta=access_token_expires,
-    #                                                   refresh_delta=refresh_token_delta)
     if is_valid_refresh_token(refreshtoken):
         new_token, refresh_token = await create_access_token(user.id, data={"sub": user.email},
                                                              expires_delta=access_token_expires,
                                                              refresh_delta=refresh_token_delta)
-        token_hash = pwd_context.hash(refresh_token)
         db_token = RefreshToken(
             token=refresh_token,
-            token_hash=token_hash,
             user_id=user.id,
             expires_at=datetime.utcnow() + access_token_expires,
             revoked=False
@@ -285,27 +273,7 @@ async def is_valid_refresh_token(token, db: AsyncSession = Depends(get_db)):
         return False
     if datetime.utcnow() > db_token.expires_at:
         return False
-    if not pwd_context.verify(db_token.token_hash, token):
-        return False
     return True
-
-
-async def add_refresh_token_to_whitelist(
-        refresh_token: str,
-        user_id: int,
-        expires_at: datetime,
-):
-    # Хеширование токена (опционально)
-    pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-    token_hash = pwd_context.hash(refresh_token)
-    db_token = RefreshToken(
-        token=refresh_token,
-        token_hash=token_hash,
-        user_id=user_id,
-        expires_at=expires_at,
-        revoked=False
-    )
-    return refresh_token
 
 
 # Функция для создания JWT
@@ -318,14 +286,10 @@ async def create_access_token(user_id: int, data: dict, expires_delta: timedelta
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     to_encode.update({'exp': refresh})
     refresh_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    # token_to_save = await add_refresh_token_to_whitelist(refresh_jwt, user_id, refresh)
     return encoded_jwt, refresh_jwt
 
 
-# Эндпоинт для получения текущего пользователя
-
-
-# Эндпоинт для получения пользователя по ID (защищенный JWT)
+# Эндпоинт для получения текущего пользователя по JWT.
 @app.get("/users/me", response_model=UserResponse)
 async def read_users_me(current_user: User = Depends(get_current_user)):
     return current_user
@@ -364,14 +328,16 @@ async def get_one_note(date: datetime, current_user: User = Depends(get_current_
         )
     )
     result = await db.execute(query)
-    return result.scalars().one_or_none()
+    if result.scalars().first():
+        return result.scalars().one_or_none()
+    else:
+        raise HTTPException(status_code=404, detail="Note not found")
 
 
 @app.post("/users/notes", response_model=NoteResponse)
 async def write_users_notes(note: NoteCreate, current_user: User = Depends(get_current_user),
                             db: AsyncSession = Depends(get_db)):
-    # db_note = Note(is_headache=note.is_headache, date=note.date, headache_time=note.headache_time,
-    # intensity=note.intensity, medicine=note.medicine, user_id=current_user.id)
+
     db_note = Note(user_id=current_user.id, **note.model_dump())
     db.add(db_note)
     await db.commit()
@@ -383,11 +349,12 @@ async def write_users_notes(note: NoteCreate, current_user: User = Depends(get_c
 async def forgot_password(email: str, db: AsyncSession = Depends(get_db)):
     try:
         logger.info(email)
-        # Проверка существующего пользователя
         existing_user = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
+        logger.info('HERE')
         if existing_user and existing_user.is_verified:
-            # Пример использования в коде
-            existing_code = (await db.execute(select(UserVerification).where(User.email == email))).scalar_one_or_none()
+            existing_code = (await db.execute(select(UserVerification).where(UserVerification.email == email))).scalar_one_or_none()
+            logger.info('HERE2')
+
             await db.delete(existing_code)
             await db.commit()
             user_verification = generate_verification_code(email)
@@ -398,10 +365,10 @@ async def forgot_password(email: str, db: AsyncSession = Depends(get_db)):
             return
 
         elif existing_user and not existing_user.is_verified or not existing_user:
+            logger.info('HERE3')
             raise HTTPException(status_code=400, detail="Email not registered")
-
     except:
-        raise HTTPException(status_code=500, detail="Error reseting password")
+        raise HTTPException(status_code=400, detail="Email not registered")
 
 
 @app.patch("/users/reset-password")
@@ -451,7 +418,6 @@ async def delete_note_by_date(date: datetime, current_user: User = Depends(get_c
 
 
 # Эндпоинты для получения и изменения списков вопросов
-
 @app.get("/users/questions", response_model=QuestionsResponse)
 async def read_users_questions(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     questions = (
@@ -477,6 +443,26 @@ async def update_questions(questions_data: QuestionsData, current_user: User = D
     await db.commit()
     await db.refresh(questions)
     return questions
+
+def send_report_to_email(recipient, pdf_buffer, format):
+    try:
+        msg = MIMEMultipart()
+        msg['Subject'] = format.upper() + ' Report'
+        msg['From'] = SMTP_CONFIG["user"]
+        msg['To'] = recipient
+
+        text = MIMEText("Please find attached the PDF report.")
+        msg.attach(text)
+        attachment = MIMEApplication(pdf_buffer.read(), _subtype=format)
+        attachment.add_header('Content-Disposition', 'attachment', filename='report.' + format)
+        msg.attach(attachment)
+
+        with smtplib.SMTP(SMTP_CONFIG["host"], SMTP_CONFIG["port"]) as server:
+            server.starttls()
+            server.login(SMTP_CONFIG["user"], SMTP_CONFIG["password"])
+            server.send_message(msg)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Email sending failed: {str(e)}")
 
 
 @app.post("/users/report")
@@ -508,6 +494,9 @@ async def generate_report(report: ReportCreate, current_user: User = Depends(get
                                      headers={f"Content-Disposition": f'attachment; filename="report.csv"'})
         else:
             send_report_to_email(current_user.email, buffer, 'csv')
+
+
+
 
 
 def convert_to_native(df_grouped):
@@ -594,10 +583,6 @@ async def create_statistics(date_start, date_end, user_id, db):
     top_triggers.append({'name': 'Остальные', 'count': count})
 
     result['top_triggers'] = top_triggers
-    # 7 пункт
-
-    # result['top_triggers'] = top_triggers
-    # Форматируем результат
     return result
 
 
@@ -625,10 +610,9 @@ def create_csv(context):
 
 
 try:
-    pdfmetrics.registerFont(TTFont('DejaVuSans', 'DejaVuSans.ttf'))
-    pdfmetrics.registerFont(TTFont('DejaVuSans-Bold', 'DejaVuSans-Bold.ttf'))
+    pdfmetrics.registerFont(TTFont('DejaVuSans', 'res/DejaVuSans.ttf'))
+    pdfmetrics.registerFont(TTFont('DejaVuSans-Bold', 'res/DejaVuSans-Bold.ttf'))
 except:
-    # Fallback для серверов без шрифтов
     pdfmetrics.registerFont(TTFont('DejaVuSans', 'arial.ttf'))  # Если есть Arial
     pdfmetrics.registerFont(TTFont('DejaVuSans-Bold', 'arialbd.ttf'))
 
@@ -645,8 +629,8 @@ def create_pdf(content):
 
     # Регистрация шрифтов (добавьте в начало функции)
     try:
-        pdfmetrics.registerFont(TTFont('DejaVuSans', 'DejaVuSans.ttf'))
-        pdfmetrics.registerFont(TTFont('DejaVuSans-Bold', 'DejaVuSans-Bold.ttf'))
+        pdfmetrics.registerFont(TTFont('DejaVuSans', 'res/DejaVuSans.ttf'))
+        pdfmetrics.registerFont(TTFont('DejaVuSans-Bold', 'res/DejaVuSans-Bold.ttf'))
     except:
         pass  # Уже зарегистрированы
 
